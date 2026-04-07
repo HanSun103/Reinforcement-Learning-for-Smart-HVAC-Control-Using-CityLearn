@@ -1,0 +1,48 @@
+# =============================================================================
+# requirements.txt — CityLearn HVAC RL Project
+# =============================================================================
+#
+# DO NOT run:  pip install -r requirements.txt
+#
+# Use the install script instead — it handles platform-specific issues:
+#   Windows (Anaconda Prompt):  install.bat
+#   macOS / Linux:              bash install.sh
+#
+# -----------------------------------------------------------------
+# Why the install script exists:
+#
+#   1. CityLearn requires openstudio<=3.3.0, which is unavailable on
+#      Windows / Python 3.11 via PyPI. We install with --no-deps and
+#      skip openstudio (only needed for EnergyPlus generation, which
+#      this project does not use).
+#
+#   2. CityLearn requires gymnasium<=0.28.1. Stable Baselines3 >= 2.3
+#      automatically upgrades gymnasium to 1.x, breaking CityLearn.
+#      We pin SB3 to 2.2.1 (last version compatible with gymnasium 0.28).
+#
+#   3. pip-installed PyTorch often fails with DLL errors in conda
+#      environments on Windows. Use conda to install PyTorch instead.
+# =============================================================================
+
+# --- PyTorch (install via conda, NOT pip; see install.bat) ---
+# conda install pytorch cpuonly -c pytorch -y
+
+# --- CityLearn (install with --no-deps; see install.bat) ---
+# citylearn==2.5.0
+
+# --- CityLearn minimal runtime deps ---
+gymnasium==0.28.1
+scikit-learn==1.2.2
+simplejson
+pyyaml
+platformdirs          # CityLearn uses this for cache directory resolution
+
+# --- RL library (pinned — last version compatible with gymnasium 0.28) ---
+stable-baselines3==2.2.1
+
+# --- Utilities ---
+# numpy capped at <2.0.0: CityLearn 2.5.0 is not compatible with numpy 2.x
+matplotlib>=3.7.0
+pandas>=2.0.0
+numpy>=1.24.0,<2.0.0
+cloudpickle
