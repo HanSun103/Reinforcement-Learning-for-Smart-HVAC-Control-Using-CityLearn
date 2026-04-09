@@ -35,7 +35,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from src import config
-from src.env_setup import make_baseline_env, get_building_obs_names
+from src.env_setup import make_baseline_env, get_building_obs_names, get_building_setpoints
 
 
 # ---------------------------------------------------------------------------
@@ -192,39 +192,32 @@ def run_baseline() -> Dict[str, Any]:
     observations, _ = env.reset()
     total_reward = 0.0
     rewards_per_step: List[float] = []
-    indoor_temps: List[float] = []
-    setpoints: List[float] = []
 
     step = 0
     while not env.terminated:
         actions = agent.predict(observations)
-
-        # CityLearn's raw env returns (obs, reward, info, terminated, truncated),
-        # which differs from standard Gymnasium order (obs, reward, terminated, truncated, info).
-        # We capture only obs and reward by position (always index 0 and 1).
-        # The loop termination uses env.terminated (a property), not the unpacked flag.
         step_result = env.step(actions)
         observations = step_result[0]
         reward = step_result[1]
 
-        # reward from env.step() with central_agent=True is a single float.
         r = float(reward) if not isinstance(reward, list) else float(sum(reward))
         total_reward += r
         rewards_per_step.append(r)
-
-        # Record temperature for the controlled building.
-        try:
-            b = env.buildings[0]
-            indoor_temps.append(float(b.indoor_dry_bulb_temperature[-1]))
-            setpoints.append(float(b.indoor_dry_bulb_temperature_set_point[-1]))
-        except (AttributeError, IndexError):
-            pass  # skip if not available this timestep
-
         step += 1
-        if step % 1000 == 0:
+        if step % 200 == 0:
             print(f"  [RBC] Step {step:5d} | cumulative reward: {total_reward:.2f}")
 
     print(f"  [RBC] Episode complete — {step} steps | total reward: {total_reward:.4f}")
+
+    # Extract temperature history after the episode (LSTMDynamicsBuilding
+    # accumulates the full run history, which is more reliable than
+    # step-by-step collection with attribute checks).
+    b = env.buildings[0]
+    try:
+        indoor_temps = [float(x) for x in b.indoor_dry_bulb_temperature[:step]]
+    except (AttributeError, TypeError):
+        indoor_temps = []
+    setpoints = get_building_setpoints(b, step)
 
     # CityLearn's evaluate() returns a DataFrame of normalised KPIs.
     kpis_raw = env.evaluate()

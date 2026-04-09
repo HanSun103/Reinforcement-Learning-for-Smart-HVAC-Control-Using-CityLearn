@@ -8,21 +8,20 @@ Run from the project root directory (after running train.py):
 
 What this script does
 ---------------------
-1. Load the trained SAC model from disk.
-2. Run one deterministic evaluation episode and collect KPIs + traces.
-3. Load the baseline KPIs and trace data saved by train.py.
-4. Generate and save the following outputs to results/:
-     - rl_kpis.csv                     : RL agent KPI table
-     - kpi_comparison.png              : grouped bar chart (baseline vs SAC)
-     - training_rewards.png            : SAC episode reward curve
-     - temperature_trace_baseline.png  : indoor temp vs setpoint (baseline)
-     - temperature_trace_sac.png       : indoor temp vs setpoint (SAC)
-     - reward_comparison.png           : per-step reward side-by-side
-5. Print a formatted summary table to the console.
+1. Load the baseline KPIs and trace data saved by train.py.
+2. Evaluate every RL model that exists on disk (SAC and/or PPO).
+3. Generate outputs in results/:
+     - sac_kpis.csv / ppo_kpis.csv     : per-algorithm KPI tables
+     - kpi_comparison.png              : grouped bar chart (all agents)
+     - training_rewards.png            : training reward curves (all algorithms)
+     - temperature_trace_*.png         : indoor temp vs setpoint, one per agent
+     - reward_comparison.png           : per-step reward (all agents)
+4. Print a formatted side-by-side KPI summary table.
 
 Prerequisites
 -------------
-- Run `python src/train.py` first to produce the model and baseline files.
+    python src/train.py          # trains both SAC and PPO (default)
+    python src/train.py --algo sac   # or just one
 """
 
 import os
@@ -32,13 +31,12 @@ import time
 import numpy as np
 import pandas as pd
 
-# Ensure project root is on sys.path so 'src.*' imports resolve correctly.
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from src import config
-from src.rl_agent import evaluate_sac
+from src.rl_agent import evaluate_agent
 from src.utils import (
     plot_training_rewards,
     plot_kpi_comparison,
@@ -49,20 +47,11 @@ from src.utils import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _load_baseline_kpis() -> pd.DataFrame:
-    """
-    Load the baseline KPI CSV saved by train.py.
-
-    Returns
-    -------
-    pd.DataFrame
-        KPI table with cost_function as index.
-
-    Raises
-    ------
-    FileNotFoundError
-        If train.py has not been run yet.
-    """
     if not os.path.exists(config.BASELINE_KPI_PATH):
         raise FileNotFoundError(
             f"Baseline KPI file not found at '{config.BASELINE_KPI_PATH}'. "
@@ -74,28 +63,31 @@ def _load_baseline_kpis() -> pd.DataFrame:
 
 
 def _load_baseline_trace() -> dict:
-    """
-    Load the baseline temperature trace saved by train.py.
-
-    Returns
-    -------
-    dict with keys 'indoor_temps', 'setpoints', 'rewards'.
-    Returns empty lists if the file does not exist.
-    """
     trace_path = os.path.join(config.RESULTS_DIR, "baseline_trace.npz")
     if not os.path.exists(trace_path):
-        print(f"  Warning: baseline trace not found at '{trace_path}'. "
-              "Temperature comparison plot will be skipped.")
+        print(f"  Warning: baseline trace not found — temperature plots will be skipped.")
         return {"indoor_temps": [], "setpoints": [], "rewards": []}
-
     data = np.load(trace_path, allow_pickle=True)
     print(f"  Loaded baseline trace from: {trace_path}")
     return {
         "indoor_temps": data["indoor_temps"].tolist(),
-        "setpoints": data["setpoints"].tolist(),
-        "rewards": data["rewards"].tolist(),
+        "setpoints":    data["setpoints"].tolist(),
+        "rewards":      data["rewards"].tolist(),
     }
 
+
+def _available_algos() -> list:
+    """Return the list of algorithms whose model files exist on disk."""
+    candidates = [
+        ("sac", config.SAC_MODEL_SAVE_PATH + ".zip"),
+        ("ppo", config.PPO_MODEL_SAVE_PATH + ".zip"),
+    ]
+    return [algo for algo, path in candidates if os.path.exists(path)]
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     print("\n" + "=" * 60)
@@ -108,53 +100,70 @@ def main():
     os.makedirs(config.RESULTS_DIR, exist_ok=True)
 
     # ------------------------------------------------------------------
-    # Step 1: Load baseline data
+    # Step 1: Load baseline
     # ------------------------------------------------------------------
     print("--- Step 1: Loading baseline results ---")
     baseline_kpis = _load_baseline_kpis()
     baseline_trace = _load_baseline_trace()
 
     # ------------------------------------------------------------------
-    # Step 2: Evaluate SAC agent
+    # Step 2: Evaluate available RL models
     # ------------------------------------------------------------------
-    print("\n--- Step 2: Evaluating trained SAC agent ---")
-    t0 = time.time()
-    rl_results = evaluate_sac()   # loads model from MODEL_SAVE_PATH
-    elapsed = time.time() - t0
-    print(f"  RL evaluation completed in {elapsed:.1f}s")
+    algos = _available_algos()
+    if not algos:
+        print("\n  No trained RL models found. Run `python src/train.py` first.\n")
+        return
 
-    rl_kpis = rl_results["kpis"]
+    print(f"\n--- Step 2: Evaluating {', '.join(a.upper() for a in algos)} ---")
 
-    # Save RL KPIs to CSV.
-    save_metrics_csv(rl_kpis, config.RL_KPI_PATH)
+    # Collect results for all agents.
+    # agents_kpis  : {label: kpi_DataFrame}   for bar chart + summary table
+    # agents_rewards: {label: rewards_list}   for reward comparison plot
+    agents_kpis = {"RBC": baseline_kpis}
+    agents_rewards = {"RBC": baseline_trace["rewards"]}
+    rl_results = {}
+
+    kpi_path_map = {"sac": config.SAC_KPI_PATH, "ppo": config.PPO_KPI_PATH}
+
+    for algo in algos:
+        t0 = time.time()
+        result = evaluate_agent(algo)
+        print(f"  {algo.upper()} evaluation completed in {time.time() - t0:.1f}s")
+
+        save_metrics_csv(result["kpis"], kpi_path_map[algo])
+
+        label = algo.upper()
+        agents_kpis[label] = result["kpis"]
+        agents_rewards[label] = result["rewards_per_step"]
+        rl_results[algo] = result
 
     # ------------------------------------------------------------------
-    # Step 3: Print summary comparison
+    # Step 3: KPI summary table
     # ------------------------------------------------------------------
     print("\n--- Step 3: KPI comparison ---")
-    print_summary_table(baseline_kpis, rl_kpis)
+    print_summary_table(agents_kpis)
 
     # ------------------------------------------------------------------
-    # Step 4: Generate plots
+    # Step 4: Plots
     # ------------------------------------------------------------------
     print("--- Step 4: Generating plots ---")
 
-    # 4a. Training reward curve (reads SB3 Monitor CSV).
-    print("  Plotting training reward curve...")
+    # 4a. Training reward curves (all algorithms on one figure).
+    print("  Plotting training reward curves…")
     try:
-        plot_training_rewards(log_dir=config.MONITOR_LOG_DIR)
+        plot_training_rewards()
     except Exception as exc:
         print(f"  Warning: could not plot training rewards ({exc}).")
 
     # 4b. KPI comparison bar chart.
-    print("  Plotting KPI comparison...")
+    print("  Plotting KPI comparison…")
     try:
-        plot_kpi_comparison(baseline_kpis, rl_kpis)
+        plot_kpi_comparison(agents_kpis)
     except Exception as exc:
         print(f"  Warning: could not plot KPI comparison ({exc}).")
 
     # 4c. Temperature trace — baseline.
-    print("  Plotting baseline temperature trace...")
+    print("  Plotting baseline temperature trace…")
     try:
         if baseline_trace["indoor_temps"]:
             plot_temperature_trace(
@@ -163,36 +172,31 @@ def main():
                 label="Baseline (RBC)",
                 filename="temperature_trace_baseline.png",
             )
-        else:
-            print("  Skipping baseline temperature trace (no data).")
     except Exception as exc:
-        print(f"  Warning: could not plot baseline temperature trace ({exc}).")
+        print(f"  Warning: {exc}")
 
-    # 4d. Temperature trace — RL agent.
-    print("  Plotting SAC temperature trace...")
-    try:
-        if rl_results["indoor_temps"]:
-            plot_temperature_trace(
-                indoor_temps=rl_results["indoor_temps"],
-                setpoints=rl_results["setpoints"],
-                label="SAC (RL agent)",
-                filename="temperature_trace_sac.png",
-            )
-        else:
-            print("  Skipping SAC temperature trace (no data).")
-    except Exception as exc:
-        print(f"  Warning: could not plot SAC temperature trace ({exc}).")
+    # 4d. Temperature trace — each RL agent.
+    for algo, result in rl_results.items():
+        label = algo.upper()
+        print(f"  Plotting {label} temperature trace…")
+        try:
+            if result["indoor_temps"]:
+                plot_temperature_trace(
+                    indoor_temps=result["indoor_temps"],
+                    setpoints=result["setpoints"],
+                    label=f"{label} (RL agent)",
+                    filename=f"temperature_trace_{algo}.png",
+                )
+        except Exception as exc:
+            print(f"  Warning: {exc}")
 
-    # 4e. Per-step reward comparison.
-    print("  Plotting per-step reward comparison...")
+    # 4e. Per-step reward comparison (all agents).
+    print("  Plotting per-step reward comparison…")
     try:
-        if baseline_trace["rewards"] and rl_results["rewards_per_step"]:
-            plot_reward_comparison(
-                baseline_rewards=baseline_trace["rewards"],
-                rl_rewards=rl_results["rewards_per_step"],
-            )
+        if any(len(v) > 0 for v in agents_rewards.values()):
+            plot_reward_comparison(agents=agents_rewards)
         else:
-            print("  Skipping reward comparison (missing data for one or both agents).")
+            print("  Skipping (no reward data).")
     except Exception as exc:
         print(f"  Warning: could not plot reward comparison ({exc}).")
 
@@ -204,15 +208,14 @@ def main():
     print(f"  All outputs saved to: {config.RESULTS_DIR}/")
     print()
     print("  Files generated:")
-    output_files = [
-        "rl_kpis.csv",
-        "kpi_comparison.png",
-        "training_rewards.png",
-        "temperature_trace_baseline.png",
-        "temperature_trace_sac.png",
-        "reward_comparison.png",
-    ]
-    for f in output_files:
+    expected = (
+        [f"{algo}_kpis.csv" for algo in algos]
+        + ["kpi_comparison.png", "training_rewards.png",
+           "temperature_trace_baseline.png"]
+        + [f"temperature_trace_{algo}.png" for algo in algos]
+        + ["reward_comparison.png"]
+    )
+    for f in expected:
         path = os.path.join(config.RESULTS_DIR, f)
         status = "OK" if os.path.exists(path) else "MISSING"
         print(f"    [{status}] {f}")

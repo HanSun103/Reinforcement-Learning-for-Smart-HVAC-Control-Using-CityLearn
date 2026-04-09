@@ -69,6 +69,49 @@ def get_building_obs_names(building) -> list:
     return ["<observation_names_unavailable>"]
 
 
+def get_building_setpoints(building, n_steps: int) -> list:
+    """
+    Return up to *n_steps* indoor temperature setpoint values for *building*.
+
+    ``LSTMDynamicsBuilding`` in CityLearn 2.5.0 does not accumulate
+    ``indoor_dry_bulb_temperature_set_point`` as a per-step history list the
+    way it does for ``indoor_dry_bulb_temperature``.  The schedule lives in
+    ``building.energy_simulation`` instead.
+
+    Tries several access paths in order and returns an empty list if none work.
+
+    Parameters
+    ----------
+    building : Building-like
+    n_steps : int
+        How many values to return (sliced from the beginning of the schedule).
+
+    Returns
+    -------
+    list of float
+    """
+    # Path 1: history list on the building object (works for some building types)
+    try:
+        sp = building.indoor_dry_bulb_temperature_set_point
+        if sp is not None and hasattr(sp, "__len__") and len(sp) >= n_steps:
+            return [float(x) for x in sp[:n_steps]]
+    except Exception:
+        pass
+
+    # Path 2: full schedule in energy_simulation (standard for LSTMDynamicsBuilding)
+    for attr in ("indoor_dry_bulb_temperature_set_point",
+                 "indoor_dry_bulb_temperature_setpoint"):
+        try:
+            esim = building.energy_simulation
+            sp = getattr(esim, attr, None)
+            if sp is not None and hasattr(sp, "__len__") and len(sp) > 0:
+                return [float(x) for x in sp[:n_steps]]
+        except Exception:
+            pass
+
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -253,13 +296,16 @@ def _configure_observations(schema: dict) -> dict:
     """
     Activate only the observations listed in config.ACTIVE_OBSERVATIONS.
 
-    CityLearn's schema has a top-level ``observations`` dict mapping each
-    observation name to a sub-dict with at least an ``active`` boolean flag.
-    We set ``active: true`` only for the observations we want, and ``false``
-    for everything else.
+    CityLearn's schema has observations in two places:
 
-    This makes the state space explicit and exactly matches the MDP definition
-    in the project documentation.
+    1. Top-level ``schema["observations"]`` — shared/weather observations
+       (hour, month, outdoor temperature, pricing, solar, carbon intensity…).
+
+    2. Per-building ``schema["buildings"][name]["observations"]`` — building-
+       specific observations (indoor temperature, setpoint, storage SOC…).
+
+    Both levels are configured so that building-level obs like
+    ``indoor_dry_bulb_temperature_set_point`` are properly activated.
 
     Parameters
     ----------
@@ -268,7 +314,7 @@ def _configure_observations(schema: dict) -> dict:
     Returns
     -------
     dict
-        Schema with observation activation flags configured.
+        Schema with observation activation flags configured at both levels.
     """
     if "observations" not in schema:
         print("[env_setup] Schema has no 'observations' key — skipping obs config.")
@@ -278,6 +324,7 @@ def _configure_observations(schema: dict) -> dict:
     desired = set(config.ACTIVE_OBSERVATIONS)
     activated, deactivated = [], []
 
+    # --- Level 1: top-level (shared / weather) observations ---
     for obs_name, obs_cfg in schema["observations"].items():
         if obs_name in desired:
             obs_cfg["active"] = True
@@ -286,18 +333,38 @@ def _configure_observations(schema: dict) -> dict:
             obs_cfg["active"] = False
             deactivated.append(obs_name)
 
-    missing = desired - set(schema["observations"].keys())
-    if missing:
-        # These might be building-level observations not in top-level dict.
-        # CityLearn will still include them if the building's data file has them.
-        print(f"[env_setup] Note: {missing} not found in schema top-level obs "
-              f"(may still be available as building-level observations).")
+    top_level_names = set(schema["observations"].keys())
+
+    # --- Level 2: per-building observations ---
+    building_level_activated = []
+    for bld_name, bld_cfg in schema.get("buildings", {}).items():
+        if not bld_cfg.get("include", True):
+            continue
+        bld_obs = bld_cfg.get("observations", {})
+        for obs_name, obs_cfg in bld_obs.items():
+            if obs_name in desired and obs_name not in top_level_names:
+                obs_cfg["active"] = True
+                if obs_name not in building_level_activated:
+                    building_level_activated.append(obs_name)
+            elif obs_name not in desired:
+                obs_cfg["active"] = False
+
+    if building_level_activated:
+        print(f"[env_setup] Building-level obs activated: {building_level_activated}")
+        activated.extend(building_level_activated)
+
+    # Report observations requested but not found anywhere in the schema.
+    all_schema_names = top_level_names | set(building_level_activated)
+    still_missing = desired - all_schema_names
+    if still_missing:
+        print(f"[env_setup] Note: {still_missing} not found in schema "
+              f"(may not be available for this building/dataset — skipping).")
 
     print(
         f"[env_setup] Observations: activated {len(activated)}, "
         f"deactivated {len(deactivated)}."
     )
-    print(f"  Active state variables: {activated}")
+    print(f"  Active state variables: {sorted(activated)}")
     return schema
 
 
@@ -317,7 +384,11 @@ def _build_schema() -> dict:
 
     # Only manipulate if we got an actual dict back.
     if isinstance(schema, dict):
-        schema = _filter_to_single_building(schema, config.BUILDING_TO_USE)
+        if config.MULTI_BUILDING:
+            # All buildings remain active; the central agent controls all of them.
+            print(f"[env_setup] Multi-building mode — all buildings included.")
+        else:
+            schema = _filter_to_single_building(schema, config.BUILDING_TO_USE)
         schema["central_agent"] = True
         schema = _configure_observations(schema)
         schema = _inject_reward_function(schema)

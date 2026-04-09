@@ -1,0 +1,14 @@
+{
+  "algo": "td3",
+  "best_trial": 1,
+  "best_reward": -143.7489609503844,
+  "params": {
+    "learning_rate": 0.0008325275824469446,
+    "batch_size": 512,
+    "net_units": 512,
+    "net_layers": 3,
+    "buffer_size": 50000,
+    "policy_delay": 4,
+    "target_policy_noise": 0.24168608643003534
+  }
+}
