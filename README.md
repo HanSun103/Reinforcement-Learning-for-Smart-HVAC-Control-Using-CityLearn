@@ -132,6 +132,7 @@ pip install "gymnasium==0.28.1" "scikit-learn==1.2.2" simplejson pyyaml platform
 pip install "stable-baselines3==2.2.1" --no-deps
 pip install cloudpickle
 pip install "matplotlib>=3.7.0" "pandas>=2.0.0" "numpy>=1.24.0,<2.0.0"
+pip install "setuptools<70"          # keeps pkg_resources available for TensorBoard
 ```
 
 ---
@@ -164,7 +165,7 @@ python src/run_all.py --algo sac
 # Tune hyperparameters first, then train and evaluate:
 python src/run_all.py --tune --trials 20
 
-# Enable TensorBoard (view at localhost:6006):
+# Enable TensorBoard logging (then launch server separately — see TensorBoard section below):
 python src/run_all.py --tensorboard
 
 # Quick demo (1 episode, no eval callback):
@@ -189,10 +190,21 @@ python src/evaluate.py
 
 ### TensorBoard (if enabled)
 
+Open a **second terminal** (keep training running in the first), then:
+
 ```bash
-tensorboard --logdir results/tensorboard
-# Open http://localhost:6006 in a browser
+conda activate citylearn-rl
+python -m tensorboard.main --logdir results/tensorboard --port 6006
 ```
+
+Then open **http://localhost:6006** in your browser.
+
+> **Note — `pkg_resources` error on Windows**: if you see
+> `ModuleNotFoundError: No module named 'pkg_resources'`, run:
+> ```bash
+> pip install "setuptools<70"
+> ```
+> Newer setuptools (v80+) removed `pkg_resources`, which TensorBoard still requires.
 
 ---
 

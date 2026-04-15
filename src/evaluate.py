@@ -9,9 +9,9 @@ Run from the project root directory (after running train.py):
 What this script does
 ---------------------
 1. Load the baseline KPIs and trace data saved by train.py.
-2. Evaluate every RL model that exists on disk (SAC and/or PPO).
+2. Evaluate every RL model that exists on disk (SAC, PPO, and/or TD3).
 3. Generate outputs in results/:
-     - sac_kpis.csv / ppo_kpis.csv     : per-algorithm KPI tables
+     - sac_kpis.csv / ppo_kpis.csv / td3_kpis.csv : per-algorithm KPI tables
      - kpi_comparison.png              : grouped bar chart (all agents)
      - training_rewards.png            : training reward curves (all algorithms)
      - temperature_trace_*.png         : indoor temp vs setpoint, one per agent
@@ -20,7 +20,7 @@ What this script does
 
 Prerequisites
 -------------
-    python src/train.py          # trains both SAC and PPO (default)
+    python src/train.py          # trains SAC + PPO + TD3 (default)
     python src/train.py --algo sac   # or just one
 """
 
@@ -65,7 +65,7 @@ def _load_baseline_kpis() -> pd.DataFrame:
 def _load_baseline_trace() -> dict:
     trace_path = os.path.join(config.RESULTS_DIR, "baseline_trace.npz")
     if not os.path.exists(trace_path):
-        print(f"  Warning: baseline trace not found — temperature plots will be skipped.")
+        print("  Warning: baseline trace not found — temperature plots will be skipped.")
         return {"indoor_temps": [], "setpoints": [], "rewards": []}
     data = np.load(trace_path, allow_pickle=True)
     print(f"  Loaded baseline trace from: {trace_path}")
@@ -81,6 +81,7 @@ def _available_algos() -> list:
     candidates = [
         ("sac", config.SAC_MODEL_SAVE_PATH + ".zip"),
         ("ppo", config.PPO_MODEL_SAVE_PATH + ".zip"),
+        ("td3", config.TD3_MODEL_SAVE_PATH + ".zip"),
     ]
     return [algo for algo, path in candidates if os.path.exists(path)]
 
@@ -123,7 +124,11 @@ def main():
     agents_rewards = {"RBC": baseline_trace["rewards"]}
     rl_results = {}
 
-    kpi_path_map = {"sac": config.SAC_KPI_PATH, "ppo": config.PPO_KPI_PATH}
+    kpi_path_map = {
+        "sac": config.SAC_KPI_PATH,
+        "ppo": config.PPO_KPI_PATH,
+        "td3": config.TD3_KPI_PATH,
+    }
 
     for algo in algos:
         t0 = time.time()

@@ -107,7 +107,8 @@ def plot_training_rewards(
     ----------
     log_dirs : dict {label: log_dir_path}, optional
         If None, defaults to ``{"SAC": config.SAC_MONITOR_LOG_DIR,
-        "PPO": config.PPO_MONITOR_LOG_DIR}`` (skips any that are missing).
+        "PPO": config.PPO_MONITOR_LOG_DIR, "TD3": config.TD3_MONITOR_LOG_DIR}``
+        (skips any that are missing).
     smoothing_window : int
         Rolling-average window size.
     filename : str
@@ -117,6 +118,7 @@ def plot_training_rewards(
         log_dirs = {
             "SAC": config.SAC_MONITOR_LOG_DIR,
             "PPO": config.PPO_MONITOR_LOG_DIR,
+            "TD3": config.TD3_MONITOR_LOG_DIR,
         }
 
     fig, ax = plt.subplots(figsize=(10, 4))
