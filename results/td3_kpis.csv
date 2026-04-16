@@ -9,12 +9,12 @@ discomfort_cold_delta_average,0.0003,0.0003
 discomfort_cold_delta_maximum,0.1236,0.1236
 discomfort_cold_delta_minimum,0.0,0.0
 discomfort_cold_proportion,0.0,0.0
-discomfort_hot_delta_average,9.5158,9.5158
-discomfort_hot_delta_maximum,16.7922,16.7922
+discomfort_hot_delta_average,9.516,9.516
+discomfort_hot_delta_maximum,16.7933,16.7933
 discomfort_hot_delta_minimum,0.0,0.0
 discomfort_hot_proportion,0.9804,0.9804
 discomfort_proportion,0.9804,0.9804
-electricity_consumption_total,0.3822,0.3822
+electricity_consumption_total,0.3821,0.3821
 monthly_one_minus_load_factor_average,,1.1332
 one_minus_thermal_resilience_proportion,1.0,1.0
 power_outage_normalized_unserved_energy_total,0.5704,0.5704
